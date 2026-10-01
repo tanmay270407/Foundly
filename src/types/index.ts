@@ -147,15 +147,25 @@ export interface Claim {
 
 export interface AdminRequest {
   id: string;
+  applicant_id?: string;
   full_name: string;
   email: string;
   phone: string;
-  college_id: string;
-  representative_id: string;
+  college_id?: string | null;
+  requested_college_name?: string;
+  representative_id?: string;
+  staff_id?: string;
+  college_proof_path?: string;
   proof_file_path?: string;
+  proof_information?: string;
   reason: string;
-  status: AdminRequestStatus;
+  status: AdminRequestStatus | 'pending' | 'approved' | 'rejected';
+  reviewed_by?: string;
+  reviewed_at?: string;
+  rejection_reason?: string;
   created_at: string;
+  updated_at?: string;
+  colleges?: College;
 }
 
 export interface NotificationItem {

@@ -16,6 +16,7 @@ import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { LoadingState } from '../../components/ui/LoadingState';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { parseAdminRequest } from '../../lib/adminRequests';
 
 export const OwnerDashboard: React.FC = () => {
   const { navigate } = useRouter();
@@ -227,7 +228,7 @@ export const OwnerDashboard: React.FC = () => {
                       <p className="text-[11px] text-slate-500 truncate">{req.email}</p>
                       <p className="text-[10px] text-indigo-600 font-medium truncate mt-0.5 flex items-center gap-1">
                         <Building2 className="w-3 h-3" />
-                        <span>{req.colleges?.name || 'Unknown Campus'}</span>
+                        <span>{req.colleges?.name || parseAdminRequest(req).extractedCollegeName || 'Pending Campus'}</span>
                       </p>
                     </div>
                     <Button

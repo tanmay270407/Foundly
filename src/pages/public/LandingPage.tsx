@@ -181,9 +181,10 @@ export const LandingPage: React.FC = () => {
           </div>
           <Button
             size="sm"
-            className="bg-white text-indigo-950 hover:bg-indigo-50 border-none shrink-0"
+            variant="secondary"
+            className="!bg-amber-500 hover:!bg-amber-400 !text-slate-950 font-bold border-none shrink-0 shadow-sm transition-colors"
             onClick={() => navigate('/admin-application')}
-            rightIcon={<ArrowRight className="w-4 h-4" />}
+            rightIcon={<ArrowRight className="w-4 h-4 text-slate-950" />}
           >
             Apply for Admin
           </Button>

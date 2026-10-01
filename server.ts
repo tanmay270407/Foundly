@@ -987,11 +987,300 @@ app.post('/api/send-return-emails', async (req, res) => {
   }
 });
 
+// Helper to send decision emails to applicants via Resend
+async function sendDecisionEmail(params: {
+  toEmail: string;
+  recipientName: string;
+  subject: string;
+  html: string;
+  collegeId?: string | null;
+  action: string;
+  requestId: string;
+}): Promise<{ emailSent: boolean; emailWarning?: string }> {
+  const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
+  const fromEmail = (process.env.FROM_EMAIL || 'Foundly <onboarding@resend.dev>').trim();
+
+  if (!resendApiKey) {
+    const warning = 'Notification email skipped: RESEND_API_KEY is not configured on the server.';
+    console.warn(`[Admin Decision Email] ${warning}`);
+    return { emailSent: false, emailWarning: warning };
+  }
+
+  if (!params.toEmail) {
+    return { emailSent: false, emailWarning: 'Applicant has no valid email address on record.' };
+  }
+
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: [params.toEmail],
+        subject: params.subject,
+        html: params.html
+      })
+    });
+
+    const resBody = await res.json() as any;
+    if (!res.ok) {
+      const warning = `Email delivery to applicant (${params.toEmail}) failed: ${resBody?.message || res.statusText || 'Resend error'}`;
+      console.warn(`[Admin Decision Email] ${warning}`);
+      return { emailSent: false, emailWarning: warning };
+    }
+
+    // Log email record to activity_logs
+    await supabase
+      .from('activity_logs')
+      .insert({
+        college_id: params.collegeId || null,
+        action: params.action,
+        entity_type: 'ADMIN_REQUEST',
+        entity_id: params.requestId,
+        metadata: { sent_to: params.toEmail, resend_id: resBody.id }
+      });
+
+    return { emailSent: true };
+  } catch (err: any) {
+    const warning = `Email delivery exception for ${params.toEmail}: ${err.message || 'Network failure'}`;
+    console.warn(`[Admin Decision Email] ${warning}`);
+    return { emailSent: false, emailWarning: warning };
+  }
+}
+
+// 5.5. COLLEGE ADMIN APPLICATION SUBMISSION WITH ATOMIC DUPLICATE CHECK
+app.post('/api/admin-application/submit', async (req, res) => {
+  const {
+    fullName,
+    email,
+    phone,
+    staffId,
+    collegeName,
+    proofFilePath,
+    proofFileName,
+    statement,
+    applicantId
+  } = req.body;
+
+  if (!fullName || !email || !collegeName || !statement) {
+    return res.status(400).json({ error: 'Missing required application fields.' });
+  }
+
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = fullName.trim();
+    const cleanPhone = (phone || '').trim();
+    const cleanStaffId = (staffId || '').trim();
+    const cleanCollegeName = collegeName.trim();
+    const cleanStatement = statement.trim();
+
+    // 1. Check if applicant is ALREADY an approved College Admin
+    if (applicantId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*, colleges(*)')
+        .eq('id', applicantId)
+        .maybeSingle();
+
+      if (profile && profile.role === 'college_admin') {
+        return res.json({
+          status: 'ALREADY_APPROVED',
+          message: 'Applicant has already been approved as a verified College Administrator.',
+          assignedCollegeName: profile.colleges?.name || 'Your Assigned Campus',
+          assignedCollegeId: profile.college_id,
+          profile
+        });
+      }
+    }
+
+    // Also check if an approved request exists for this applicant_id or email
+    let approvedQuery = supabase
+      .from('admin_requests')
+      .select('*, colleges(*)')
+      .eq('status', 'approved');
+
+    if (applicantId) {
+      approvedQuery = approvedQuery.or(`applicant_id.eq.${applicantId},email.ilike.${cleanEmail}`);
+    } else {
+      approvedQuery = approvedQuery.ilike('email', cleanEmail);
+    }
+
+    const { data: approvedReq } = await approvedQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (approvedReq) {
+      return res.json({
+        status: 'ALREADY_APPROVED',
+        message: 'Applicant has already been approved as a verified College Administrator.',
+        assignedCollegeName: approvedReq.colleges?.name || approvedReq.requested_college_name || 'Your Assigned Campus',
+        assignedCollegeId: approvedReq.college_id,
+        existingApplication: approvedReq
+      });
+    }
+
+    // 2. Check for an existing PENDING application (applicantId or email)
+    // Enforce: ONE user = maximum ONE active PENDING admin application.
+    let pendingQuery = supabase
+      .from('admin_requests')
+      .select('*, colleges(*)')
+      .eq('status', 'pending');
+
+    if (applicantId) {
+      pendingQuery = pendingQuery.or(`applicant_id.eq.${applicantId},email.ilike.${cleanEmail}`);
+    } else {
+      pendingQuery = pendingQuery.ilike('email', cleanEmail);
+    }
+
+    const { data: existingPending, error: pendingErr } = await pendingQuery
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingPending) {
+      return res.json({
+        status: 'ALREADY_PENDING',
+        message: 'You already have a College Admin application under review.',
+        existingApplication: existingPending
+      });
+    }
+
+    // 3. Format structured reason metadata
+    const formattedReason = [
+      `[Campus: ${cleanCollegeName}]`,
+      `[Staff ID: ${cleanStaffId}]`,
+      '',
+      'Role & Statement of Intent:',
+      cleanStatement
+    ].join('\n');
+
+    // 4. Resolve a holding college_id reference if required by database schema
+    let matchedCollegeId = null;
+    const { data: colleges } = await supabase.from('colleges').select('id, name, code');
+    if (colleges && colleges.length > 0) {
+      const match = colleges.find(c => 
+        c.name.trim().toLowerCase() === cleanCollegeName.toLowerCase() ||
+        c.code.trim().toLowerCase() === cleanCollegeName.toLowerCase()
+      );
+      matchedCollegeId = match ? match.id : colleges[0].id;
+    }
+
+    // 5. Insert new application (status = 'pending')
+    // Previous rejected requests are preserved and untouched.
+    const basePayload: any = {
+      full_name: cleanName,
+      email: cleanEmail,
+      phone: cleanPhone,
+      college_proof_path: proofFilePath || null,
+      reason: formattedReason,
+      status: 'pending'
+    };
+
+    if (applicantId) {
+      basePayload.applicant_id = applicantId;
+    }
+    if (matchedCollegeId) {
+      basePayload.college_id = matchedCollegeId;
+    }
+
+    const extendedPayload = {
+      ...basePayload,
+      requested_college_name: cleanCollegeName,
+      staff_id: cleanStaffId,
+      representative_id: cleanStaffId,
+      proof_information: proofFileName || null
+    };
+
+    let insertedRecord = null;
+    const tryExtended = await supabase
+      .from('admin_requests')
+      .insert(extendedPayload)
+      .select('*, colleges(*)')
+      .single();
+
+    if (tryExtended.error) {
+      // Check if duplicate constraint violated (e.g. concurrent race condition / double-click)
+      if (
+        tryExtended.error.code === '23505' || 
+        tryExtended.error.message?.includes('unique') || 
+        tryExtended.error.message?.includes('duplicate')
+      ) {
+        const { data: conflictRow } = await pendingQuery.limit(1).maybeSingle();
+        return res.json({
+          status: 'ALREADY_PENDING',
+          message: 'You already have a College Admin application under review.',
+          existingApplication: conflictRow || {
+            requested_college_name: cleanCollegeName,
+            status: 'pending',
+            created_at: new Date().toISOString()
+          }
+        });
+      }
+
+      // If extended columns missing, fallback to base
+      const tryBase = await supabase
+        .from('admin_requests')
+        .insert(basePayload)
+        .select('*, colleges(*)')
+        .single();
+
+      if (tryBase.error) {
+        if (
+          tryBase.error.code === '23505' || 
+          tryBase.error.message?.includes('unique') || 
+          tryBase.error.message?.includes('duplicate')
+        ) {
+          const { data: conflictRow } = await pendingQuery.limit(1).maybeSingle();
+          return res.json({
+            status: 'ALREADY_PENDING',
+            message: 'You already have a College Admin application under review.',
+            existingApplication: conflictRow || {
+              requested_college_name: cleanCollegeName,
+              status: 'pending',
+              created_at: new Date().toISOString()
+            }
+          });
+        }
+        throw tryBase.error;
+      }
+      insertedRecord = tryBase.data;
+    } else {
+      insertedRecord = tryExtended.data;
+    }
+
+    return res.json({
+      status: 'SUCCESS',
+      message: 'Your College Admin application has been submitted and is under review.',
+      application: insertedRecord
+    });
+  } catch (err: any) {
+    console.error('[Admin Application Submit Error]', err);
+    return res.status(500).json({ error: err.message || 'Failed to submit application.' });
+  }
+});
+
 // 6. PLATFORM OWNER SECURE API ENDPOINTS
+
+// Get All Admin Requests for Owner
+app.get('/api/owner/admin-requests', async (req, res) => {
+  try {
+    await authenticateOwner(req);
+    const { data, error } = await supabase
+      .from('admin_requests')
+      .select('*, colleges(*)')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return res.json({ requests: data || [] });
+  } catch (err: any) {
+    console.error('[Get Admin Requests Error]', err);
+    return res.status(err.message?.includes('Unauthorized') ? 401 : 500).json({ error: err.message || 'Failed to retrieve admin requests.' });
+  }
+});
 
 // Approve Admin Application
 app.post('/api/owner/approve-admin', async (req, res) => {
-  const { requestId } = req.body;
+  const { requestId, collegeId } = req.body;
   if (!requestId) {
     return res.status(400).json({ error: 'requestId is required.' });
   }
@@ -1014,48 +1303,119 @@ app.post('/api/owner/approve-admin', async (req, res) => {
       return res.status(400).json({ error: `Request is already ${request.status}.` });
     }
 
+    const targetCollegeId = collegeId || request.college_id;
+    if (!targetCollegeId) {
+      return res.status(400).json({ error: 'A college campus assignment is required to approve this application.' });
+    }
+
+    // Fetch assigned college details
+    const { data: collegeObj } = await supabase
+      .from('colleges')
+      .select('id, name, code')
+      .eq('id', targetCollegeId)
+      .single();
+
+    const assignedCollegeName = collegeObj?.name || 'Assigned Campus Directory';
     const timestamp = new Date().toISOString();
 
-    // 1. Update the admin_request status to approved
-    // The database trigger "trg_admin_request_approval" automatically handles the profile promotion to college_admin
+    // 1. Update the admin_request status to approved and assign college_id
+    const updatePayload: any = {
+      status: 'approved',
+      college_id: targetCollegeId,
+      reviewed_by: user.id,
+      reviewed_at: timestamp
+    };
+
     const { error: updateErr } = await supabase
       .from('admin_requests')
-      .update({
-        status: 'approved',
-        reviewed_by: user.id,
-        reviewed_at: timestamp
-      })
+      .update(updatePayload)
       .eq('id', requestId);
 
     if (updateErr) {
       return res.status(500).json({ error: 'Failed to approve admin application.', details: updateErr.message });
     }
 
-    // 2. Insert notification for the new admin
-    await supabase
-      .from('notifications')
-      .insert({
-        user_id: request.applicant_id,
-        college_id: request.college_id,
-        type: 'CLAIM_UPDATE', // Use a standard notification type
-        title: 'Application Approved 🎉',
-        message: 'Your application to become a verified College Administrator has been approved. You now have access to the Admin Panel!',
-        link: '/admin'
-      });
+    // 2. Promote applicant to college_admin in profiles table
+    if (request.applicant_id) {
+      await supabase
+        .from('profiles')
+        .update({
+          role: 'college_admin',
+          college_id: targetCollegeId,
+          updated_at: timestamp
+        })
+        .eq('id', request.applicant_id);
+    }
 
-    // 3. Log the activity record
+    // 3. Insert in-app notification for the applicant
+    if (request.applicant_id) {
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: request.applicant_id,
+          college_id: targetCollegeId,
+          type: 'CLAIM_UPDATE',
+          title: 'Application Approved 🎉',
+          message: `Your application to become a verified College Administrator for ${assignedCollegeName} has been approved. You now have access to the Admin Panel!`,
+          link: '/admin'
+        });
+    }
+
+    // 4. Log the activity record
     await supabase
       .from('activity_logs')
       .insert({
         actor_id: user.id,
-        college_id: request.college_id,
-        action: 'ADMIN_PROMOTED', // Standard platform action
+        college_id: targetCollegeId,
+        action: 'ADMIN_PROMOTED',
         entity_type: 'ADMIN_REQUEST',
         entity_id: requestId,
-        metadata: { applicant_name: request.full_name, applicant_email: request.email, college_id: request.college_id }
+        metadata: { 
+          applicant_name: request.full_name, 
+          applicant_email: request.email, 
+          assigned_college_id: targetCollegeId,
+          assigned_college_name: assignedCollegeName
+        }
       });
 
-    return res.json({ success: true, message: 'Admin request approved and user promoted successfully.' });
+    // 5. Send approval email to ORIGINAL APPLICANT EMAIL only after DB operations succeed
+    const approvalHtml = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 28px; line-height: 1.6; color: #1e293b; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <h2 style="color: #4f46e5; margin-top: 0; font-size: 22px;">Congratulations, ${request.full_name || 'Administrator'}! 🎉</h2>
+        <p>We are pleased to inform you that your application to become a verified <strong>College Administrator</strong> has been <strong>approved</strong> by the Foundly Platform Owner.</p>
+        <div style="background-color: #f8fafc; border-left: 4px solid #4f46e5; padding: 16px; margin: 20px 0; border-radius: 6px;">
+          <p style="margin: 0; font-size: 13px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Assigned Campus Directory</p>
+          <p style="margin: 4px 0 0 0; font-size: 16px; font-weight: 600; color: #0f172a;">${assignedCollegeName} (${collegeObj?.code || 'CAMP'})</p>
+        </div>
+        <p>Your account permissions have been upgraded. You now have full administrative access to manage campus lost &amp; found items, resolve student ownership claims, configure secure storage locations, and oversee campus operations.</p>
+        <p style="margin: 28px 0;">
+          <a href="${process.env.APP_URL || 'https://foundly.app'}/admin" style="background-color: #4f46e5; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block; font-size: 14px;">Open College Admin Portal</a>
+        </p>
+        <p style="font-size: 13px; color: #64748b; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+          Thank you for keeping your campus community organized and connected.<br/>
+          — Team Foundly
+        </p>
+      </div>
+    `;
+
+    const emailResult = await sendDecisionEmail({
+      toEmail: request.email,
+      recipientName: request.full_name,
+      subject: `Foundly College Administrator Application Approved — ${assignedCollegeName} 🎉`,
+      html: approvalHtml,
+      collegeId: targetCollegeId,
+      action: 'ADMIN_APPROVAL_EMAIL_SENT',
+      requestId: requestId
+    });
+
+    return res.json({ 
+      success: true, 
+      message: 'Admin request approved and user promoted successfully.',
+      assignedCollegeId: targetCollegeId,
+      assignedCollegeName: assignedCollegeName,
+      emailSent: emailResult.emailSent,
+      emailWarning: emailResult.emailWarning
+    });
   } catch (err: any) {
     console.error('[Approve Admin Error]', err);
     return res.status(err.message?.includes('Unauthorized') ? 401 : 500).json({ error: err.message || 'Failed to approve admin request.' });
@@ -1088,15 +1448,21 @@ app.post('/api/owner/reject-admin', async (req, res) => {
     }
 
     const timestamp = new Date().toISOString();
+    const rejectionReasonText = reason?.trim() || 'Credentials could not be verified';
 
-    // Update the request to rejected
+    // Extract requested campus name
+    const requestedCampus = request.requested_college_name ||
+      (request.reason?.match(/\[Campus:\s*([^\]]+)\]/i)?.[1]?.trim()) ||
+      'the requested institution';
+
+    // 1. Update the request to rejected
     const { error: updateErr } = await supabase
       .from('admin_requests')
       .update({
         status: 'rejected',
         reviewed_by: user.id,
         reviewed_at: timestamp,
-        rejection_reason: reason || 'Credentials could not be verified'
+        rejection_reason: rejectionReasonText
       })
       .eq('id', requestId);
 
@@ -1104,31 +1470,74 @@ app.post('/api/owner/reject-admin', async (req, res) => {
       return res.status(500).json({ error: 'Failed to reject admin application.', details: updateErr.message });
     }
 
-    // Insert notification for the user
-    await supabase
-      .from('notifications')
-      .insert({
-        user_id: request.applicant_id,
-        college_id: request.college_id,
-        type: 'CLAIM_UPDATE',
-        title: 'Application Rejected',
-        message: `Your administrator application was declined. Reason: ${reason || 'Credentials could not be verified'}`,
-        link: '/admin-application'
-      });
+    // 2. Insert notification for the user
+    if (request.applicant_id) {
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: request.applicant_id,
+          college_id: request.college_id || null,
+          type: 'CLAIM_UPDATE',
+          title: 'Application Update',
+          message: `Your administrator application was declined.${reason ? ` Reason: ${reason.trim()}` : ''}`,
+          link: '/admin-application'
+        });
+    }
 
-    // Log the activity record
+    // 3. Log the activity record
     await supabase
       .from('activity_logs')
       .insert({
         actor_id: user.id,
-        college_id: request.college_id,
+        college_id: request.college_id || null,
         action: 'ADMIN_REJECTED',
         entity_type: 'ADMIN_REQUEST',
         entity_id: requestId,
-        metadata: { applicant_name: request.full_name, reason: reason || 'Credentials could not be verified' }
+        metadata: { 
+          applicant_name: request.full_name, 
+          applicant_email: request.email, 
+          requested_college: requestedCampus,
+          reason: rejectionReasonText 
+        }
       });
 
-    return res.json({ success: true, message: 'Admin request rejected successfully.' });
+    // 4. Send rejection email to ORIGINAL APPLICANT EMAIL only after DB operations succeed
+    const rejectionHtml = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 28px; line-height: 1.6; color: #1e293b; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <h2 style="color: #334155; margin-top: 0; font-size: 20px;">Foundly Administrator Application Update</h2>
+        <p>Hello ${request.full_name || 'Applicant'},</p>
+        <p>Thank you for submitting your application to serve as a College Administrator for <strong>${requestedCampus}</strong> on Foundly.</p>
+        <p>After reviewing the provided documentation and institutional credentials, we are unable to approve your application at this time.</p>
+        ${reason ? `
+        <div style="background-color: #fff1f2; border-left: 4px solid #f43f5e; padding: 14px 16px; margin: 20px 0; border-radius: 6px;">
+          <p style="margin: 0; font-size: 12px; color: #9f1239; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Reason for Decision</p>
+          <p style="margin: 4px 0 0 0; font-size: 14px; color: #881337;">${reason.trim()}</p>
+        </div>
+        ` : ''}
+        <p>If you believe this decision was made in error or if you have updated staff credentials or verification documents, you are welcome to submit a revised application or contact our team.</p>
+        <p style="font-size: 13px; color: #64748b; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+          Warm regards,<br/>
+          — Team Foundly
+        </p>
+      </div>
+    `;
+
+    const emailResult = await sendDecisionEmail({
+      toEmail: request.email,
+      recipientName: request.full_name,
+      subject: `Foundly Administrator Application Status — ${requestedCampus}`,
+      html: rejectionHtml,
+      collegeId: request.college_id,
+      action: 'ADMIN_REJECTION_EMAIL_SENT',
+      requestId: requestId
+    });
+
+    return res.json({ 
+      success: true, 
+      message: 'Admin request rejected successfully.',
+      emailSent: emailResult.emailSent,
+      emailWarning: emailResult.emailWarning
+    });
   } catch (err: any) {
     console.error('[Reject Admin Error]', err);
     return res.status(err.message?.includes('Unauthorized') ? 401 : 500).json({ error: err.message || 'Failed to reject admin request.' });

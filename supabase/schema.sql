@@ -655,6 +655,12 @@ CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 -- Admin Requests indexes
 CREATE INDEX IF NOT EXISTS idx_admin_requests_college_id ON admin_requests(college_id);
 CREATE INDEX IF NOT EXISTS idx_admin_requests_status ON admin_requests(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_requests_one_pending_per_applicant 
+  ON admin_requests (applicant_id) 
+  WHERE status = 'pending' AND applicant_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_requests_one_pending_per_email 
+  ON admin_requests (LOWER(email)) 
+  WHERE status = 'pending';
 
 -- Notifications indexes
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);

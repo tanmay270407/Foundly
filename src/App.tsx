@@ -1,9 +1,9 @@
 import React from 'react';
+import { Building2, ShieldCheck, ArrowRight } from 'lucide-react';
 import { ToastProvider } from './context/ToastContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { RouterProvider, useRouter } from './context/RouterContext';
-import { RoleSwitcherBanner } from './components/layout/RoleSwitcherBanner';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
@@ -47,7 +47,16 @@ import { OwnerRolloutPage } from './pages/owner/OwnerRolloutPage';
 import { OwnerPilotPage } from './pages/owner/OwnerPilotPage';
 
 const AppContent: React.FC = () => {
-  const { currentPath, perspective } = useRouter();
+  const { currentPath, perspective, navigate, setPerspective } = useRouter();
+  const { role } = useAuth();
+
+  const hideAdminFooterBlock = 
+    currentPath.startsWith('/admin') || 
+    currentPath.startsWith('/owner') || 
+    perspective === 'COLLEGE_ADMIN' || 
+    perspective === 'FOUNDLY_OWNER' || 
+    role === 'college_admin' || 
+    role === 'foundly_owner';
 
   // Route dispatcher with role-based access control
   const renderCurrentView = () => {
@@ -260,11 +269,11 @@ const AppContent: React.FC = () => {
     currentPath === '/signup' || 
     currentPath === '/admin-application';
 
+  // The footer is shown only on the 1st page (home page '/') and removed from admin sign in dashboard & inner views
+  const showFooter = currentPath === '/';
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 font-sans antialiased">
-      {/* Role Switcher Toolbar for Phase 2 UI & Permission Verification */}
-      <RoleSwitcherBanner />
-
       {/* Global Navbar */}
       <Navbar />
 
@@ -287,20 +296,74 @@ const AppContent: React.FC = () => {
         </div>
       )}
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200/80 bg-white py-6 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800 tracking-tight">Foundly</span>
-            <span>— College-Specific Lost & Found Network</span>
+      {/* Footer (only displayed on the 1st page) */}
+      {showFooter && (
+        <footer className="border-t border-slate-200/80 bg-white py-8 mt-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-6">
+            {/* Main Footer Row */}
+            <div className={`flex flex-col md:flex-row md:items-center gap-6 pb-6 border-b border-slate-100 ${
+              hideAdminFooterBlock ? 'justify-center text-center' : 'justify-between'
+            }`}>
+              {/* Brand column */}
+              <div className={`space-y-1.5 ${hideAdminFooterBlock ? 'flex flex-col items-center text-center mx-auto' : ''}`}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                    F
+                  </div>
+                  <span className="font-bold text-slate-900 tracking-tight text-sm">Foundly</span>
+                  <span className="text-slate-300">|</span>
+                  <span className="text-xs text-slate-500 font-medium">Campus Lost &amp; Found Network</span>
+                </div>
+                <p className={`text-[11px] text-slate-400 max-w-md leading-relaxed ${hideAdminFooterBlock ? 'text-center' : ''}`}>
+                  Empowering college campuses with secure, verifiable lost and found item recovery and multi-campus isolation.
+                </p>
+              </div>
+
+              {/* College Administration Section in Footer */}
+              {!hideAdminFooterBlock && (
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+                      <Building2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-900 block leading-tight">
+                        College Administration
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        Campus staff &amp; authorized representatives
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1 sm:pt-0 sm:pl-3 sm:border-l sm:border-slate-200">
+                    <button
+                      onClick={() => {
+                        navigate('/admin-application');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-xs"
+                      title="Apply for College Administrator credentials"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>College Admin Signup Application</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Subfooter Row */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-400">
+              <span>&copy; {new Date().getFullYear()} Foundly. All campus rights reserved.</span>
+              <div className="flex items-center gap-4">
+                <span>Supabase Auth &amp; RLS Architecture</span>
+                <span>•</span>
+                <span>Multi-College Isolation Active</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-4 text-[11px] text-slate-400">
-            <span>Phase 2: Supabase Auth & RLS Architecture</span>
-            <span>•</span>
-            <span>Multi-College Isolation Active</span>
-          </div>
-        </div>
-      </footer>
+        </footer>
+      )}
     </div>
   );
 };

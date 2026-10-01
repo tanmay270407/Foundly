@@ -68,13 +68,43 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, ch
   const effectiveRole = role || 'student';
   const isSuspended = Boolean(profile?.avatar_url?.startsWith('[SUSPENDED]'));
 
+  // If an Owner account attempts to access student or admin sections in the main Foundly application,
+  // do not expose Owner management pages or controls. Redirect to the separate Owner Portal.
+  if (effectiveRole === 'foundly_owner' && !currentPath.startsWith('/owner')) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center p-6">
+        <div className="w-full max-w-md bg-white border border-purple-200/80 rounded-3xl p-8 text-center shadow-xs space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-purple-50 border border-purple-200/60 text-purple-600 flex items-center justify-center mx-auto">
+            <Building2 className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Platform Owner Account</h2>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Your account is authorized as the Foundly Platform Owner. Please use the separate Owner Portal to manage colleges, review admin applications, and monitor platform activity.
+            </p>
+          </div>
+          <div className="pt-2 flex justify-center">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => navigate('/owner')}
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+            >
+              Open Foundly Owner Portal
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Hierarchy check:
-  // - foundly_owner can access everything
+  // - foundly_owner can access owner portal
   // - college_admin can access college_admin and student (unless suspended, then student only)
   // - student can only access student
   let hasPermission = false;
   if (effectiveRole === 'foundly_owner') {
-    hasPermission = true;
+    hasPermission = allowedRoles.includes('foundly_owner');
   } else if (effectiveRole === 'college_admin') {
     if (isSuspended) {
       hasPermission = allowedRoles.includes('student') && !allowedRoles.includes('college_admin');
