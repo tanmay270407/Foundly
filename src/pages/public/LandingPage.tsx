@@ -7,7 +7,6 @@ import {
   Building2, 
   ShieldCheck, 
   Sparkles, 
-  ArrowRight,
   HelpCircle,
   Clock,
   Compass
@@ -167,27 +166,6 @@ export const LandingPage: React.FC = () => {
               <p className="text-[11px] text-slate-500">Intelligent item matching</p>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* College Admin CTA banner */}
-      <section className="w-full max-w-4xl mx-auto px-4 pb-16">
-        <div className="p-6 rounded-2xl bg-indigo-900 text-white flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
-          <div>
-            <h3 className="text-base font-bold">Are you a campus staff member or representative?</h3>
-            <p className="text-xs text-indigo-200 mt-1">
-              Apply for College Admin privileges to manage your campus lost and found center.
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="!bg-amber-500 hover:!bg-amber-400 !text-slate-950 font-bold border-none shrink-0 shadow-sm transition-colors"
-            onClick={() => navigate('/admin-application')}
-            rightIcon={<ArrowRight className="w-4 h-4 text-slate-950" />}
-          >
-            Apply for Admin
-          </Button>
         </div>
       </section>
     </div>
