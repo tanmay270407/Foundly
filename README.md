@@ -1,59 +1,122 @@
-# DataPilot AI 🚀
+# Foundly
 
-## AI-Powered Data Intelligence Platform
+> A secure, AI-assisted Lost & Found platform designed for colleges and universities.
 
-**Team TechVed**
+## 🚀 Overview
 
-DataPilot AI is an intelligent data analysis platform that allows users to ask complex data questions in natural language and automatically transforms those questions into structured, reliable data workflows.
+**Foundly** is a college-specific Lost & Found platform that helps students report lost and found items, discover potential matches, submit claims, and recover their belongings through a secure verification process.
 
-Instead of requiring users to write SQL queries, manually clean datasets, or create charts themselves, DataPilot AI guides the entire process from **question → data → analysis → insight**.
+The platform connects **Students**, **College Admins**, and the **Foundly Owner** while maintaining strict college-level data isolation.
 
----
-
-## 🎯 Problem
-
-Data is available everywhere, but extracting meaningful insights often requires technical expertise.
-
-Traditional data analysis usually involves:
-
-- Finding the right datasets
-- Writing SQL or code
-- Cleaning and validating data
-- Performing calculations
-- Creating visualizations
-- Interpreting the results
-
-This creates a barrier for non-technical users and makes the analysis process time-consuming.
+Foundly uses AI-assisted matching to identify possible matches between lost and found items, while the final ownership verification remains under the control of the authorized College Admin.
 
 ---
 
-## 💡 Our Solution
+## 🎯 Problem Statement
 
-DataPilot AI lets users simply describe what they want to know.
+Students often lose personal belongings on campus, while found items may remain with students, security desks, or administration without an efficient way to reconnect them with their owners.
 
-For example:
+Traditional Lost & Found processes are often:
 
-> "Compare air quality across Delhi, Mumbai and Bengaluru over the last 30 days."
+- Manual
+- Difficult to track
+- Limited to physical notices
+- Time-consuming
+- Vulnerable to false claims
+- Not centralized
+- Difficult to manage across multiple colleges
 
-DataPilot AI understands the request and creates a structured workflow:
+Foundly provides a centralized and structured digital solution.
+
+---
+
+## 💡 Solution
+
+Foundly provides a complete workflow:
+
+1. Student reports a lost or found item.
+2. College Admin reviews the report.
+3. Approved items become available on the college platform.
+4. Students can search and filter items.
+5. Gemini AI assists in finding potential lost/found matches.
+6. A student submits a claim.
+7. College Admin verifies the claim.
+8. Handover is coordinated.
+9. Admin confirms the item has been returned.
+10. The case is closed and the activity is recorded.
+
+---
+
+## 👥 User Roles
+
+### 👨‍🎓 Student
+
+Students can:
+
+- Create an account
+- Select their college
+- Report lost items
+- Report found items
+- Upload item images
+- Search and filter items
+- View potential matches
+- Submit claims
+- Track claim status
+- Receive notifications
+- View their activity
+
+### 🧑‍💼 College Admin
+
+College Admins can:
+
+- Review lost/found reports
+- Approve or reject reports
+- Manage items
+- Review claims
+- Verify ownership
+- Manage handovers
+- Confirm returned items
+- Close completed cases
+- View college-level activity
+
+### 👑 Foundly Owner
+
+The Foundly Owner manages the platform at the global level.
+
+The Owner can:
+
+- Manage colleges
+- Review College Admin applications
+- Review submitted documents
+- Approve or reject admin applications
+- Assign admins to colleges
+- Activate/deactivate College Admins
+- View college-level analytics
+- Export college statistics
+- Monitor platform activity
+- Manage Owner settings
+
+---
+
+## 🔄 Item Workflow
 
 ```text
-Natural Language Request
+Report Lost / Found
         ↓
-AI Understanding
+Admin Review
         ↓
-Data Planning
+Approved / Published
         ↓
-Data Collection
+Search & Browse
         ↓
-Data Cleaning
+AI-Assisted Matching
         ↓
-Data Validation
+Claim Submitted
         ↓
-Analysis
+Admin Verification
         ↓
-Visualization
+Handover
         ↓
-AI Insights
+Returned
         ↓
-Report
+Closed
